@@ -2,34 +2,32 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Physics DSL v1.3 - Debug Mode</title>
+<title>Physics DSL - Explicit Setup</title>
 <style>
-  body { background: #0f0f13; color: #e8e4d9; font-family: 'Courier New', monospace; display: flex; flex-direction: column; align-items: center; padding: 20px; }
-  canvas { border: 1px solid #2a2a35; background: #12121a; border-radius: 4px; }
+  body { background: #0b0b0e; color: #e8e4d9; font-family: 'Courier New', monospace; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+  canvas { border: 1px solid #333; background: #000; border-radius: 4px; }
   .terminal-container { width: 850px; margin-top: 20px; background: #16161e; border: 1px solid #5a9; padding: 12px; }
-  #cli-input { width: 100%; background: #000; border: 1px solid #2a2a35; color: #7bc; font-size: 13px; padding: 10px; height: 200px; outline: none; }
-  #run-btn { margin-top:10px; background:#5a9; color:#000; border:none; padding:10px 25px; cursor:pointer; font-weight:bold; }
-  #debug-log { width: 850px; height: 80px; background: #000; color: #f55; font-size: 11px; overflow-y: scroll; margin-top: 10px; padding: 5px; border: 1px solid #311; }
+  #cli-input { width: 100%; background: #000; border: 1px solid #2a2a35; color: #7bc; font-size: 13px; padding: 10px; height: 300px; outline: none; line-height: 1.5; }
+  #run-btn { margin-top:10px; background:#5a9; color:#000; border:none; padding:12px 30px; cursor:pointer; font-weight:bold; }
+  .status { font-size: 12px; color: #555; margin-top: 10px; }
 </style>
 </head>
 <body>
 
-<canvas id="c" width="850" height="400"></canvas>
+<canvas id="c" width="850" height="450"></canvas>
 <div class="terminal-container">
   <textarea id="cli-input" spellcheck="false"></textarea>
   <button id="run-btn">RUN SCRIPT</button>
 </div>
-<div id="debug-log">Log: System Ready...</div>
+<div class="status">Note: Use <b>setup.Stage()</b> and <b>setup.Walls()</b> to initialize the environment.</div>
 
 <script>
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
-const logEl = document.getElementById('debug-log');
+const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
 const W = canvas.width, H = canvas.height, SCALE = 50;
+let bodies = [], globalItems = {}, classes = {};
 
-let bodies = [], classes = {}, globalItems = {};
-
-function log(msg) { logEl.innerHTML += `<div>> ${msg}</div>`; logEl.scrollTop = logEl.scrollHeight; }
+const px = m => m * SCALE + W/2;
+const py = m => -m * SCALE + H/2;
 
 class Vec2 {
     constructor(x=0,y=0){this.x=x;this.y=y;}
@@ -63,58 +61,102 @@ class Body {
 }
 
 function runScript(rawText) {
-    logEl.innerHTML = "Log: Initializing...";
-    bodies = []; classes = {}; globalItems = {};
+    bodies = []; globalItems = {}; classes = {};
     const lines = rawText.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('/*'));
     
-    lines.forEach((line, index) => {
-        try {
-            if (line.startsWith('item spawn')) {
-                const name = line.split(' ')[2];
-                globalItems[name] = { isStatic: line.includes('static'), events: {bounce:[], roll:[], touch:[]} };
-            }
-            else if (line.startsWith('item config')) {
-                const name = line.split(' ')[2];
-                const target = globalItems[name];
-                if (line.includes('{')) {
-                    const block = line.match(/\{([^}]*)\}/)[1];
-                    block.split(',').forEach(pair => {
-                        const [k, v] = pair.split(';').map(s => s.trim());
-                        if (k === 'shape') target.shape = v;
-                        if (k === 'color') target.color = v;
-                        if (k === 'elasticity') target.elasticity = parseFloat(v);
-                        if (k === 'size') {
-                            const c = v.replace(/[{}]/g, '').split(',').map(n => parseFloat(n.trim()));
-                            target.size = new Vec2(c[0], c[1]);
-                        }
-                    });
-                }
-                if (line.toLowerCase().includes('speed')) {
-                    const vec = line.match(/\[x;\s*([\d.-]+),\s*y;\s*([\d.-]+)\]/);
-                    if (vec) target.speed = new Vec2(parseFloat(vec[1]), parseFloat(vec[2]));
-                }
-            }
-            else if (line.startsWith('effect')) {
-                const name = line.match(/effect\s+([\w.]+)/)[1];
-                const block = line.match(/\{([^}]*)\}/)[1];
-                const target = globalItems[name];
-                if (target) {
-                    block.split(',').forEach(p => {
-                        const [trig, cmd] = p.split(';').map(s => s.trim());
-                        const key = trig.split('.')[1];
-                        if (target.events[key]) target.events[key].push(cmd);
-                    });
-                }
-            }
-            else if (line.startsWith('item place')) {
-                const name = line.split(' ')[2];
-                const c = line.match(/\[([\d.-]+),\s*([\d.-]+)\]/);
-                if (c && globalItems[name]) bodies.push(new Body(parseFloat(c[1]), parseFloat(c[2]), globalItems[name]));
-            }
-        } catch (e) {
-            log(`Error Line ${index + 1}: ${e.message}`);
+    let i = 0;
+    while(i < lines.length) {
+        let line = lines[i];
+
+        if (line === 'setup.Stage()') { /* Logic for background/grid could go here */ }
+        
+        if (line === 'setup.Walls()') {
+            bodies.push(new Body(0, -4.5, {shape:'Rect', size: new Vec2(20, 0.5), isStatic:true, color:'#1a1a24'}));
+            bodies.push(new Body(-8.5, 0, {shape:'Rect', size: new Vec2(0.5, 20), isStatic:true, color:'#1a1a24'}));
+            bodies.push(new Body(8.5, 0, {shape:'Rect', size: new Vec2(0.5, 20), isStatic:true, color:'#1a1a24'}));
         }
-    });
+
+        if (line.startsWith('class')) {
+            const className = line.split(' ')[1];
+            classes[className] = {};
+            i++;
+            while(i < lines.length && !lines[i].includes('>')) {
+                let s = lines[i];
+                if (s.startsWith('item spawn')) {
+                    const name = s.split(' ')[2];
+                    classes[className][name] = { isStatic: s.includes('static'), events: {bounce:[], roll:[], touch:[]} };
+                }
+                if (s.startsWith('item config')) {
+                    const name = s.split(' ')[2];
+                    applyConfig(classes[className][name], s);
+                }
+                if (s.startsWith('items place')) {
+                    const names = s.match(/\((.*?)\)/)[1].split(',').map(n => n.trim());
+                    const coords = [...s.matchAll(/\[([\d.-]+),([\d.-]+)\]/g)];
+                    names.forEach((n, idx) => {
+                        if (coords[idx]) bodies.push(new Body(parseFloat(coords[idx][1]), parseFloat(coords[idx][2]), classes[className][n]));
+                    });
+                }
+                i++;
+            }
+        }
+
+        if (line.startsWith('item spawn') && !line.includes('.')) {
+            const name = line.split(' ')[2];
+            globalItems[name] = { isStatic: line.includes('static'), events: {bounce:[], roll:[], touch:[]} };
+        }
+
+        if (line.startsWith('item config')) {
+            const path = line.split(' ')[2];
+            if (path.includes('.')) {
+                const [cls, obj] = path.split('.');
+                applyConfig(classes[cls][obj], line);
+            } else {
+                applyConfig(globalItems[path], line);
+            }
+        }
+
+        if (line.startsWith('effect')) {
+            const path = line.match(/effect\s+([\w.]+)/)[1];
+            const block = line.match(/\{([^}]*)\}/)[1];
+            const target = path.includes('.') ? classes[path.split('.')[0]][path.split('.')[1]] : globalItems[path];
+            if (target) {
+                block.split(',').forEach(p => {
+                    const [trig, cmd] = p.split(';').map(s => s.trim());
+                    const key = trig.split('.')[1];
+                    if (target.events[key]) target.events[key].push(cmd);
+                });
+            }
+        }
+
+        if (line.startsWith('item place')) {
+            const name = line.split(' ')[2];
+            const c = line.match(/\[([\d.-]+),\s*([\d.-]+)\]/);
+            if (c && globalItems[name]) bodies.push(new Body(parseFloat(c[1]), parseFloat(c[2]), globalItems[name]));
+        }
+        i++;
+    }
+}
+
+function applyConfig(target, line) {
+    if (!target) return;
+    if (line.includes('{')) {
+        const block = line.match(/\{([^}]*)\}/)[1];
+        block.split(',').forEach(pair => {
+            const [k, v] = pair.split(';').map(s => s.trim());
+            if (k === 'shape') target.shape = v;
+            if (k === 'color') target.color = v;
+            if (k === 'elasticity') target.elasticity = parseFloat(v);
+            if (k === 'size') {
+                const c = v.replace(/[{}]/g, '').split(',').map(n => parseFloat(n.trim()));
+                target.size = new Vec2(c[0], c[1]);
+            }
+        });
+    }
+    if (line.toLowerCase().includes('speed')) {
+        const vec = line.match(/\[x;\s*([\d.-]+),\s*y;\s*([\d.-]+)\]/);
+        if (vec) target.speed = new Vec2(parseFloat(vec[1]), parseFloat(vec[2]));
+    }
 }
 
 function update() {
@@ -122,12 +164,16 @@ function update() {
         if(!b.isStatic) {
             b.vel.y -= 9.8 * 0.016;
             b.pos = b.pos.add(b.vel.scale(0.016));
-            if(b.pos.y < -3.5) { b.pos.y = -3.5; b.vel.y *= -b.restitution; if(Math.abs(b.vel.y)>1) b.trigger('bounce'); }
         }
         bodies.forEach(other => {
-           if(b === other) return;
-           let d = new Vec2(b.pos.x - other.pos.x, b.pos.y - other.pos.y).len();
-           if(d < (b.w+other.w)/4) { b.trigger('touch'); other.trigger('bounce'); }
+            if (b === other) return;
+            let dx = b.pos.x - other.pos.x, dy = b.pos.y - other.pos.y;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+            let minDist = (b.w + other.w) / 4;
+            if (dist < minDist) {
+                if (!b.isStatic) { b.vel.y *= -b.restitution; b.pos.y += 0.05; b.trigger('bounce'); }
+                else { other.trigger('bounce'); }
+            }
         });
         if (b.glowTimer > 0) b.glowTimer--; else b.color = b.baseColor;
         if (b.isSpinning) { b.angle += 0.2; if(b.angle >= 6.28) { b.angle = 0; b.isSpinning = false; } }
@@ -137,14 +183,35 @@ function update() {
         ctx.save(); ctx.translate(px(b.pos.x), py(b.pos.y)); ctx.rotate(b.angle); ctx.fillStyle = b.color;
         if (b.glowTimer > 0) { ctx.shadowBlur = 20; ctx.shadowColor = b.color; }
         if(b.type === 'rect') ctx.fillRect(-b.w*SCALE/2, -b.h*SCALE/2, b.w*SCALE, b.h*SCALE);
-        else { ctx.beginPath(); ctx.ellipse(0,0,(b.w/2)*SCALE,(b.h/2)*SCALE,0,0,6.29); ctx.fill(); }
+        else { ctx.beginPath(); ctx.ellipse(0,0,(b.w/2)*SCALE,(b.h/2)*SCALE,0,0,Math.PI*2); ctx.fill(); }
         ctx.restore();
     });
     requestAnimationFrame(update);
 }
 
 document.getElementById('run-btn').onclick = () => runScript(document.getElementById('cli-input').value);
-const px = m => m * SCALE + W/2; const py = m => -m * SCALE + H/2;
+
+document.getElementById('cli-input').value = `setup.Stage()
+setup.Walls()
+
+class Bumpers <
+    item spawn b1 static
+    item config b1 {shape; Ellipse, size; {0.5, 0.5}, color; #d3d3d3}
+    item config b1 Speed {Vect [x; 0, y; 0]}
+    item spawn b2 static
+    item config b2 {shape; Ellipse, size; {0.5, 0.5}, color; #d3d3d3}
+    item config b2 Speed {Vect [x; 0, y; 0]}
+    items place(b1, b2) ([1,0] [-1,0])
+>
+
+item spawn Marble nonstatic
+item config Marble {shape; Ellipse, size; {0.3, 0.3}, color; #00eeff, elasticity; 100}
+item config Marble speed {Vect [x; 3, y; 2]}
+
+effect Marble {object.bounce; glow(#ffffff), object.bounce; size(+0.1)}
+
+item place Marble [0,2]`;
+
 update();
 </script>
 </body>
