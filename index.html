@@ -2,45 +2,34 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Physics Scripting - Event System</title>
+<title>Physics DSL v1.3 - Debug Mode</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #0f0f13; color: #e8e4d9; font-family: 'Courier New', monospace; display: flex; flex-direction: column; align-items: center; padding: 20px; }
   canvas { border: 1px solid #2a2a35; background: #12121a; border-radius: 4px; }
-  .terminal-container { width: 850px; margin-top: 20px; background: #16161e; border: 1px solid #5a9; padding: 12px; border-radius: 4px; }
-  .terminal-label { font-size: 10px; color: #5a9; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.1em; }
-  #cli-input { width: 100%; background: #000; border: 1px solid #2a2a35; color: #7bc; font-family: 'Courier New', monospace; font-size: 13px; padding: 10px; height: 220px; outline: none; resize: vertical; line-height: 1.4; }
-  #run-btn { margin-top:10px; background:#5a9; color:#000; border:none; padding:8px 20px; cursor:pointer; font-weight:bold; }
-  .hint-box { width: 850px; margin-top: 15px; font-size: 11px; color: #555; column-count: 2; }
+  .terminal-container { width: 850px; margin-top: 20px; background: #16161e; border: 1px solid #5a9; padding: 12px; }
+  #cli-input { width: 100%; background: #000; border: 1px solid #2a2a35; color: #7bc; font-size: 13px; padding: 10px; height: 200px; outline: none; }
+  #run-btn { margin-top:10px; background:#5a9; color:#000; border:none; padding:10px 25px; cursor:pointer; font-weight:bold; }
+  #debug-log { width: 850px; height: 80px; background: #000; color: #f55; font-size: 11px; overflow-y: scroll; margin-top: 10px; padding: 5px; border: 1px solid #311; }
 </style>
 </head>
 <body>
 
-<h1 style="font-size: 14px; margin-bottom: 20px; letter-spacing: 0.3em; color: #5a9;">REACTIVE PHYSICS ENGINE</h1>
 <canvas id="c" width="850" height="400"></canvas>
-
 <div class="terminal-container">
-  <div class="terminal-label">Scripting Console (Events & Effects)</div>
   <textarea id="cli-input" spellcheck="false"></textarea>
-  <button id="run-btn">EXECUTE SCRIPT</button>
+  <button id="run-btn">RUN SCRIPT</button>
 </div>
-
-<div class="hint-box">
-  <strong>Event Syntax:</strong><br>
-  <code>effect [name] {object.bounce; glow(#ffffff)}</code><br>
-  <strong>Triggers:</strong> <code>bounce</code>, <code>roll</code>, <code>touch</code><br>
-  <strong>Commands:</strong> <code>glow(hex)</code>, <code>size(+/-)</code>, <code>spin()</code>
-</div>
+<div id="debug-log">Log: System Ready...</div>
 
 <script>
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
+const logEl = document.getElementById('debug-log');
 const W = canvas.width, H = canvas.height, SCALE = 50;
-let bodies = [];
 
-const px = m => m * SCALE + W/2;
-const py = m => -m * SCALE + H/2;
+let bodies = [], classes = {}, globalItems = {};
+
+function log(msg) { logEl.innerHTML += `<div>> ${msg}</div>`; logEl.scrollTop = logEl.scrollHeight; }
 
 class Vec2 {
     constructor(x=0,y=0){this.x=x;this.y=y;}
@@ -52,118 +41,78 @@ class Vec2 {
 class Body {
     constructor(x, y, cfg) {
         this.pos = new Vec2(x, y);
-        this.vel = cfg.speed || new Vec2(0,0);
-        this.type = cfg.shape || 'Rect';
-        this.w = cfg.size?.x || 0.5;
-        this.h = cfg.size?.y || 0.5;
+        this.vel = cfg.speed ? new Vec2(cfg.speed.x, cfg.speed.y) : new Vec2(0,0);
+        this.type = (cfg.shape || 'Rect').toLowerCase();
+        this.w = cfg.size?.x || 1; this.h = cfg.size?.y || 1;
         this.baseColor = cfg.color || '#5a9';
         this.color = this.baseColor;
         this.restitution = (cfg.elasticity || 40) / 100;
-        this.isStatic = cfg.isStatic || false;
-        
-        // State for effects
-        this.angle = 0;
-        this.glowTimer = 0;
-        this.events = cfg.events || {}; // { bounce: [cmds], roll: [], touch: [] }
+        this.isStatic = !!cfg.isStatic;
+        this.angle = 0; this.glowTimer = 0; this.isSpinning = false;
+        this.events = JSON.parse(JSON.stringify(cfg.events || {bounce:[], roll:[], touch:[]}));
     }
-
     trigger(type) {
         const cmds = this.events[type];
         if (!cmds) return;
         cmds.forEach(cmd => {
-            if (cmd.includes('glow')) {
-                const hex = cmd.match(/#(?:[0-9a-fA-F]{3}){1,2}/)[0];
-                this.color = hex;
-                this.glowTimer = 20; // 20 frames of glow
-            }
-            if (cmd.includes('size')) {
-                const change = parseFloat(cmd.match(/[+-][\d.]+/)[0]);
-                this.w += change; this.h += change;
-            }
-            if (cmd.includes('spin')) {
-                this.isSpinning = true;
-                this.spinVal = 0;
-            }
+            if (cmd.includes('glow')) { this.color = cmd.match(/#\w+/)?.[0] || '#fff'; this.glowTimer = 15; }
+            if (cmd.includes('size')) { let d = parseFloat(cmd.match(/[+-][\d.]+/)?.[0] || 0.1); this.w += d; this.h += d; }
+            if (cmd.includes('spin')) { this.isSpinning = true; this.spinVal = 0; }
         });
-    }
-
-    updateVisuals() {
-        if (this.glowTimer > 0) {
-            this.glowTimer--;
-            if (this.glowTimer === 0) this.color = this.baseColor;
-        }
-        if (this.isSpinning) {
-            this.spinVal += 0.2;
-            this.angle = this.spinVal;
-            if (this.spinVal >= Math.PI * 2) {
-                this.isSpinning = false;
-                this.angle = 0;
-            }
-        }
-    }
-}
-
-// Logic to parse the "effect" command
-function parseEffect(line, registry) {
-    const nameMatch = line.match(/effect\s+([\w.]+)/);
-    if (!nameMatch) return;
-    const targetPath = nameMatch[1];
-    const block = line.match(/\{.*\}/)[0].slice(1,-1);
-    
-    const events = { bounce: [], roll: [], touch: [] };
-    block.split(',').forEach(part => {
-        const [trigger, cmd] = part.split(';').map(s => s.trim());
-        const eventType = trigger.split('.')[1]; // e.g. "bounce"
-        if (events[eventType]) events[eventType].push(cmd);
-    });
-
-    // Apply to item in registry
-    if (targetPath.includes('.')) {
-        const [cls, obj] = targetPath.split('.');
-        if (window.classes[cls] && window.classes[cls][obj]) window.classes[cls][obj].events = events;
-    } else {
-        if (window.globalItems[targetPath]) window.globalItems[targetPath].events = events;
     }
 }
 
 function runScript(rawText) {
-    window.classes = {};
-    window.globalItems = {};
+    logEl.innerHTML = "Log: Initializing...";
+    bodies = []; classes = {}; globalItems = {};
     const lines = rawText.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('/*'));
     
-    // Pass 1: Parse all items and effects
-    lines.forEach(line => {
-        if (line.startsWith('item spawn')) {
-            const name = line.split(' ')[2];
-            globalItems[name] = { isStatic: line.includes('static'), speed: new Vec2(0,0), events: {} };
-        }
-        if (line.startsWith('item config')) {
-            const name = line.split(' ')[2];
-            // ... (Reuse previous applyConfig logic here)
-            const target = globalItems[name];
-            if (line.includes('{')) {
-                const block = line.match(/\{.*\}/)[0].slice(1,-1);
-                block.split(',').forEach(pair => {
-                    const [k, v] = pair.split(';').map(s => s.trim());
-                    if (k === 'shape') target.shape = v;
-                    if (k === 'color') target.color = v;
-                    if (k === 'elasticity') target.elasticity = parseFloat(v);
-                    if (k === 'size') {
-                        const coords = v.replace(/[{}]/g, '').split(',').map(n => parseFloat(n.trim()));
-                        target.size = new Vec2(coords[0], coords[1]);
-                    }
-                });
+    lines.forEach((line, index) => {
+        try {
+            if (line.startsWith('item spawn')) {
+                const name = line.split(' ')[2];
+                globalItems[name] = { isStatic: line.includes('static'), events: {bounce:[], roll:[], touch:[]} };
             }
-            if (line.toLowerCase().includes('speed')) {
-                const vec = line.match(/\[x;\s*([\d.-]+),\s*y;\s*([\d.-]+)\]/);
-                if (vec) target.speed = new Vec2(parseFloat(vec[1]), parseFloat(vec[2]));
+            else if (line.startsWith('item config')) {
+                const name = line.split(' ')[2];
+                const target = globalItems[name];
+                if (line.includes('{')) {
+                    const block = line.match(/\{([^}]*)\}/)[1];
+                    block.split(',').forEach(pair => {
+                        const [k, v] = pair.split(';').map(s => s.trim());
+                        if (k === 'shape') target.shape = v;
+                        if (k === 'color') target.color = v;
+                        if (k === 'elasticity') target.elasticity = parseFloat(v);
+                        if (k === 'size') {
+                            const c = v.replace(/[{}]/g, '').split(',').map(n => parseFloat(n.trim()));
+                            target.size = new Vec2(c[0], c[1]);
+                        }
+                    });
+                }
+                if (line.toLowerCase().includes('speed')) {
+                    const vec = line.match(/\[x;\s*([\d.-]+),\s*y;\s*([\d.-]+)\]/);
+                    if (vec) target.speed = new Vec2(parseFloat(vec[1]), parseFloat(vec[2]));
+                }
             }
-        }
-        if (line.startsWith('effect')) parseEffect(line);
-        if (line.startsWith('item place')) {
-            const name = line.split(' ')[2];
-            const coords = line.match(/\[([\d.-]+),([\d.-]+)\]/);
-            if (coords) bodies.push(new Body(parseFloat(coords[1]), parseFloat(coords[2]), globalItems[name]));
+            else if (line.startsWith('effect')) {
+                const name = line.match(/effect\s+([\w.]+)/)[1];
+                const block = line.match(/\{([^}]*)\}/)[1];
+                const target = globalItems[name];
+                if (target) {
+                    block.split(',').forEach(p => {
+                        const [trig, cmd] = p.split(';').map(s => s.trim());
+                        const key = trig.split('.')[1];
+                        if (target.events[key]) target.events[key].push(cmd);
+                    });
+                }
+            }
+            else if (line.startsWith('item place')) {
+                const name = line.split(' ')[2];
+                const c = line.match(/\[([\d.-]+),\s*([\d.-]+)\]/);
+                if (c && globalItems[name]) bodies.push(new Body(parseFloat(c[1]), parseFloat(c[2]), globalItems[name]));
+            }
+        } catch (e) {
+            log(`Error Line ${index + 1}: ${e.message}`);
         }
     });
 }
@@ -173,76 +122,29 @@ function update() {
         if(!b.isStatic) {
             b.vel.y -= 9.8 * 0.016;
             b.pos = b.pos.add(b.vel.scale(0.016));
-            
-            // Simple floor interaction
-            if(b.pos.y < -3.8 + b.h/2) {
-                b.pos.y = -3.8 + b.h/2;
-                b.vel.y *= -b.restitution;
-                if (Math.abs(b.vel.y) > 1) b.trigger('bounce');
-                else b.trigger('touch');
-            }
+            if(b.pos.y < -3.5) { b.pos.y = -3.5; b.vel.y *= -b.restitution; if(Math.abs(b.vel.y)>1) b.trigger('bounce'); }
         }
-        
-        // Collision Detection for Events
         bodies.forEach(other => {
-            if (b === other) return;
-            let dist = new Vec2(b.pos.x - other.pos.x, b.pos.y - other.pos.y).len();
-            let minDist = (b.w + other.w) / 4;
-            
-            if (dist < minDist) {
-                // Determine event type
-                if (Math.abs(b.vel.y - other.vel.y) > 2) {
-                    b.trigger('bounce'); other.trigger('bounce');
-                } else if (Math.abs(b.vel.x) > 0.5 && b.type === 'Ellipse') {
-                    other.trigger('roll');
-                } else {
-                    b.trigger('touch'); other.trigger('touch');
-                }
-            }
+           if(b === other) return;
+           let d = new Vec2(b.pos.x - other.pos.x, b.pos.y - other.pos.y).len();
+           if(d < (b.w+other.w)/4) { b.trigger('touch'); other.trigger('bounce'); }
         });
-
-        b.updateVisuals();
+        if (b.glowTimer > 0) b.glowTimer--; else b.color = b.baseColor;
+        if (b.isSpinning) { b.angle += 0.2; if(b.angle >= 6.28) { b.angle = 0; b.isSpinning = false; } }
     });
-
     ctx.clearRect(0,0,W,H);
     bodies.forEach(b => {
-        ctx.save();
-        ctx.translate(px(b.pos.x), py(b.pos.y));
-        ctx.rotate(b.angle);
-        ctx.fillStyle = b.color;
-        if (b.glowTimer > 0) {
-            ctx.shadowBlur = 15;
-            ctx.shadowColor = b.color;
-        }
-        if(b.type === 'Rect') ctx.fillRect(-b.w*SCALE/2, -b.h*SCALE/2, b.w*SCALE, b.h*SCALE);
-        else { 
-            ctx.beginPath(); 
-            ctx.ellipse(0, 0, (b.w/2)*SCALE, (b.h/2)*SCALE, 0, 0, Math.PI*2); 
-            ctx.fill(); 
-        }
+        ctx.save(); ctx.translate(px(b.pos.x), py(b.pos.y)); ctx.rotate(b.angle); ctx.fillStyle = b.color;
+        if (b.glowTimer > 0) { ctx.shadowBlur = 20; ctx.shadowColor = b.color; }
+        if(b.type === 'rect') ctx.fillRect(-b.w*SCALE/2, -b.h*SCALE/2, b.w*SCALE, b.h*SCALE);
+        else { ctx.beginPath(); ctx.ellipse(0,0,(b.w/2)*SCALE,(b.h/2)*SCALE,0,0,6.29); ctx.fill(); }
         ctx.restore();
     });
     requestAnimationFrame(update);
 }
 
-document.getElementById('run-btn').onclick = () => {
-    bodies = [];
-    runScript(document.getElementById('cli-input').value);
-};
-
-// Example Script using the new Effects system
-document.getElementById('cli-input').value = `item spawn Pad static
-item config Pad {shape; Rect, size; {4, 0.5}, color; #333333, elasticity; 150}
-item place Pad [0, -2]
-
-/* Define the effect for the Pad */
-effect Pad {object.bounce; glow(#ffffff), object.bounce; size(+0.1), object.touch; spin()}
-
-item spawn Marble nonstatic
-item config Marble {shape; Ellipse, size; {0.4, 0.4}, color; #00eeff, elasticity; 100}
-item config Marble speed {Vect [x; 0, y; 5]}
-item place Marble [0, 3]`;
-
+document.getElementById('run-btn').onclick = () => runScript(document.getElementById('cli-input').value);
+const px = m => m * SCALE + W/2; const py = m => -m * SCALE + H/2;
 update();
 </script>
 </body>
